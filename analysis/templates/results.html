@@ -1,0 +1,183 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="card">
+    <div style="display: flex; justify-content: space-between; align-items: center;">
+        <h2>Swing Analysis</h2>
+        <div id="scoreBadge"
+            style="background: var(--primary); color: white; padding: 0.5rem 1rem; border-radius: 20px; font-weight: bold; font-size: 1.2rem;">
+            -- / 100
+        </div>
+    </div>
+
+    <div style="position: relative; width: 100%; padding-top: 56.25%; background: black; margin-bottom: 1rem;">
+        <video id="swingVideo" playsinline controls
+            style="position: absolute; top: 0; left: 0; width: 100%; height: 100%;"></video>
+        <canvas id="overlayCanvas"
+            style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none;"></canvas>
+    </div>
+
+    <div id="controls" style="text-align: center; margin-bottom: 1rem;">
+        <button class="btn" onclick="togglePlay()" style="width: auto;">Play / Pause</button>
+        <button class="btn" onclick="toggleSlowMo()" style="width: auto; background: #3498db;">Slow Mo</button>
+    </div>
+
+    <div id="metrics"
+        style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; text-align: center; margin-bottom: 1rem;">
+        <div class="card" style="padding: 0.5rem; margin: 0;">
+            <div style="font-size: 0.8rem; color: #7f8c8d;">Plane</div>
+            <div id="metricPlane" style="font-weight: bold;">--</div>
+        </div>
+        <div class="card" style="padding: 0.5rem; margin: 0;">
+            <div style="font-size: 0.8rem; color: #7f8c8d;">Rotation</div>
+            <div id="metricRotation" style="font-weight: bold;">--</div>
+        </div>
+        <div class="card" style="padding: 0.5rem; margin: 0;">
+            <div style="font-size: 0.8rem; color: #7f8c8d;">Tempo</div>
+            <div id="metricTempo" style="font-weight: bold;">--</div>
+        </div>
+    </div>
+
+    <h3>Feedback</h3>
+    <ul id="errorList" style="list-style: none; padding: 0;">
+        <li style="color: #7f8c8d; font-style: italic;">Loading analysis...</li>
+    </ul>
+
+    <a href="/" class="btn" style="background: #95a5a6; margin-top: 1rem;">Analyze Another Swing</a>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+    const swingId = {{ swing_id }};
+    const video = document.getElementById('swingVideo');
+    const canvas = document.getElementById('overlayCanvas');
+    const ctx = canvas.getContext('2d');
+    let analysisData = null;
+
+    // Fetch Data
+    fetch(`/api/swings/${swingId}/`)
+        .then(res => res.json())
+        .then(data => {
+            if (!data.processed) {
+                document.getElementById('errorList').innerHTML = '<li>Analysis still processing... Refresh in a moment.</li>';
+                return;
+            }
+
+            analysisData = data.analysis_data;
+            video.src = data.video;
+
+            // Render Score & Metrics
+            document.getElementById('scoreBadge').textContent = (analysisData.score || 0) + ' / 100';
+
+            const m = analysisData.metrics || {};
+            document.getElementById('metricPlane').textContent = (m.plane_score || 0).toFixed(1);
+            document.getElementById('metricRotation').textContent = (m.rotation_angle || 0).toFixed(1) + '°';
+            document.getElementById('metricTempo').textContent = (m.tempo || 0).toFixed(2);
+
+            // Render Errors
+            const errList = document.getElementById('errorList');
+            errList.innerHTML = '';
+            if (analysisData.errors && analysisData.errors.length > 0) {
+                analysisData.errors.forEach(err => {
+                    const li = document.createElement('li');
+                    li.style.background = '#ffebee';
+                    li.style.color = '#c62828';
+                    li.style.padding = '0.5rem';
+                    li.style.marginBottom = '0.5rem';
+                    li.style.borderRadius = '4px';
+                    li.textContent = err.message;
+                    errList.appendChild(li);
+                });
+            } else {
+                errList.innerHTML = '<li style="color: #27ae60;">Great swing! No major errors detected.</li>';
+            }
+
+            // Start Loop
+            requestAnimationFrame(drawOverlay);
+        });
+
+    function togglePlay() {
+        if (video.paused) video.play();
+        else video.pause();
+    }
+
+    function toggleSlowMo() {
+        video.playbackRate = video.playbackRate === 1.0 ? 0.25 : 1.0;
+    }
+
+    function drawOverlay() {
+        // Match canvas size to video display size
+        if (video.videoWidth) {
+            canvas.width = video.clientWidth;
+            canvas.height = video.clientHeight;
+
+            const scaleX = canvas.width / video.videoWidth;
+            const scaleY = canvas.height / video.videoHeight;
+
+            // Find current frame index
+            // We need to know FPS. Assuming 30 if not provided.
+            const fps = (analysisData && analysisData.metadata && analysisData.metadata.fps) || 30;
+            const currentFrameIdx = Math.floor(video.currentTime * fps);
+
+            if (analysisData && analysisData.frames) {
+                const frameData = analysisData.frames.find(f => f.frame_idx === currentFrameIdx);
+
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+                if (frameData && frameData.keypoints) {
+                    drawSkeleton(ctx, frameData.keypoints, scaleX, scaleY);
+                }
+            }
+        }
+        requestAnimationFrame(drawOverlay);
+    }
+
+    function drawSkeleton(ctx, keypoints, scaleX, scaleY) {
+        // Define connections for a stick figure
+        const connections = [
+            [11, 12], [11, 13], [13, 15], // Arms
+            [12, 14], [14, 16],
+            [11, 23], [12, 24], // Torso
+            [23, 24],
+            [23, 25], [25, 27], // Legs
+            [24, 26], [26, 28]
+        ];
+
+        ctx.strokeStyle = '#2ecc71';
+        ctx.lineWidth = 3;
+        ctx.lineCap = 'round';
+
+        // Draw Lines
+        connections.forEach(([start, end]) => {
+            const p1 = keypoints[start]; // These are indices in the 0-32 list
+            const p2 = keypoints[end];
+
+            // Note: Our keypoints list from backend is a list of dicts {x,y,z,vis}
+            // But MediaPipe returns 33 landmarks. 
+            // Our PoseEstimator saved them as a list.
+            // We need to make sure we access them correctly.
+            // The backend saved ALL landmarks in order 0-32.
+
+            if (p1 && p2 && p1.visibility > 0.5 && p2.visibility > 0.5) {
+                ctx.beginPath();
+                ctx.moveTo(p1.x * canvas.width, p1.y * canvas.height); // Normalized coords
+                ctx.lineTo(p2.x * canvas.width, p2.y * canvas.height);
+                ctx.stroke();
+            }
+        });
+
+        // Draw Joints
+        ctx.fillStyle = 'white';
+        [11, 12, 13, 14, 15, 16, 23, 24, 25, 26, 27, 28].forEach(idx => {
+            const p = keypoints[idx];
+            if (p && p.visibility > 0.5) {
+                ctx.beginPath();
+                ctx.arc(p.x * canvas.width, p.y * canvas.height, 4, 0, 2 * Math.PI);
+                ctx.fill();
+            }
+        });
+    }
+</script>
+{% endblock %}

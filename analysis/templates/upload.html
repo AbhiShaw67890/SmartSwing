@@ -1,0 +1,75 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="card">
+    <h2>Analyze Your Swing</h2>
+    <p>Upload a video or record one now.</p>
+
+    <input type="file" id="videoInput" accept="video/*" capture="environment">
+
+    <button id="uploadBtn" class="btn" onclick="uploadSwing()">Analyze Swing</button>
+
+    <div id="status"></div>
+</div>
+
+<div class="card" id="previewCard" style="display:none;">
+    <h3>Preview</h3>
+    <video id="previewVideo" controls playsinline></video>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+    const videoInput = document.getElementById('videoInput');
+    const uploadBtn = document.getElementById('uploadBtn');
+    const statusDiv = document.getElementById('status');
+    const previewCard = document.getElementById('previewCard');
+    const previewVideo = document.getElementById('previewVideo');
+
+    videoInput.addEventListener('change', function (e) {
+        const file = e.target.files[0];
+        if (file) {
+            previewCard.style.display = 'block';
+            previewVideo.src = URL.createObjectURL(file);
+        }
+    });
+
+    async function uploadSwing() {
+        const file = videoInput.files[0];
+        if (!file) {
+            alert('Please select a video first');
+            return;
+        }
+
+        const formData = new FormData();
+        formData.append('video', file);
+
+        uploadBtn.disabled = true;
+        uploadBtn.textContent = 'Uploading...';
+        statusDiv.textContent = 'Uploading video...';
+
+        try {
+            const response = await fetch(API_BASE, {
+                method: 'POST',
+                body: formData
+            });
+
+            if (!response.ok) throw new Error('Upload failed');
+
+            const data = await response.json();
+            statusDiv.textContent = 'Upload complete! Redirecting...';
+
+            // Redirect to results page
+            window.location.href = `/results/${data.id}/`;
+
+        } catch (error) {
+            console.error(error);
+            statusDiv.textContent = 'Error: ' + error.message;
+        } finally {
+            uploadBtn.disabled = false;
+            uploadBtn.textContent = 'Analyze Swing';
+        }
+    }
+</script>
+{% endblock %}
