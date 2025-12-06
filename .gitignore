@@ -1,0 +1,13 @@
+# Python virtual environment
+.venv/
+
+# Temporary folder
+temp/
+
+# Ignore Python cache
+__pycache__/
+
+# Ignore common Python build artifacts
+*.pyc
+*.pyo
+*.pyd
